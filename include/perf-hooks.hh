@@ -1,9 +1,10 @@
 
+#define PINTOOL
 
 #if defined(PINTOOL)
 
-#define MAGIC_OP_ROI_BEGIN         (1025)
-#define MAGIC_OP_ROI_END           (1026)
+#define MAGIC_OP_ROI_BEGIN           (0)
+#define MAGIC_OP_ROI_END           (0xFFFFFFFF)
 #define COMPILER_BARRIER() { __asm__ __volatile__("" ::: "memory");}
 
 static inline void do_magic_op(uint64_t op) {
@@ -18,6 +19,6 @@ static inline void do_magic_op(uint64_t op) {
 #elif defined(COUNTERS)
 
 #else
-#define PERF_ROI_BEGIN()
+#define PERF_ROI_BEGIN(rid)
 #define PERF_ROI_END()
 #endif

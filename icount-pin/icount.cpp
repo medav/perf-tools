@@ -15,35 +15,36 @@
 UINT64 record = 0;
 UINT64 roi_counter = 0;
 
-std::vector<bool> active;
+std::vector<INT64> active;
 std::vector<UINT64> counters;
 
 uint32_t lock;
 std::ofstream ofs;
 
 VOID HandleMagicOp(THREADID tid, ADDRINT op) {
+    // std::cerr << std::hex << op << std::dec << std::endl;
     switch (op) {
-        case MAGIC_OP_ROI_BEGIN:
-            futex_lock(&lock);
-            if (counters.size() <= tid) {
-                counters.resize(tid + 1);
-                active.resize(tid + 1);
-            }
-
-            counters[tid] = 0;
-            active[tid] = true;
-            futex_unlock(&lock);
-            break;
         case MAGIC_OP_ROI_END:
-            active[tid] = false;
             ofs << "{"
                 << "thread: " << tid << ", "
+                << "rid: " << active[tid] << ", "
                 << "icount: " << counters[tid]
                 << "}" << std::endl;
             
+            active[tid] = -1;
             break;
 
         default:
+            // std::cerr << "BEGIN" << std::endl;
+            futex_lock(&lock);
+            if (counters.size() <= tid) {
+                counters.resize(tid + 1);
+                active.resize(tid + 1, -1);
+            }
+
+            counters[tid] = 0;
+            active[tid] = op;
+            futex_unlock(&lock);
             break;
     }
 }
@@ -60,7 +61,7 @@ INT32 Usage() {
 }
 
 VOID docount(THREADID tid) {
-    if (tid < active.size() && active[tid]) counters[tid]++;
+    if (tid < active.size() && active[tid] != -1) counters[tid]++;
 }
 
 VOID Instruction(INS ins, VOID *v) {
