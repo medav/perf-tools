@@ -1,3 +1,3 @@
 #!/bin/bash
 
-$PIN_ROOT/pin -follow_execv -t $PIN_ROOT/../icount-pin/obj-intel64/icount.so -- $@
+$PIN_ROOT/pin -follow_execv -t $PIN_ROOT/../icount-pin/obj-intel64/icount.so $@

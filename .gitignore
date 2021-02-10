@@ -1,6 +1,5 @@
 *.log
 *.out
-*.so
 *.o
 .vscode
 **/obj-*

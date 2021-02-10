@@ -39,6 +39,11 @@ UINT64 active = 0;
 uint32_t lock;
 std::ofstream ofs;
 
+KNOB<BOOL> KnobCountAll(KNOB_MODE_WRITEONCE, "pintool",
+    "a", "0", "count all instructions");
+
+KNOB<UINT64> KnobRegion(KNOB_MODE_WRITEONCE, "pintool",
+    "r", "0", "specify region to track");
 
 LOCALFUN std::string IndexToOpcodeString( UINT32 index )
 {
@@ -68,21 +73,21 @@ VOID DumpStats() {
 }
 
 VOID HandleMagicOp(THREADID tid, ADDRINT op) {
-    // std::cerr << std::hex << op << std::dec << std::endl;
-    switch (op) {
-        case MAGIC_OP_ROI_END:
-            DumpStats();
-            active = 0;
-            break;
+    if (KnobCountAll.Value() != 0) return;
+    std::cerr << std::hex << op << std::dec << std::endl;
 
-        case MAGIC_OP_ROI_BEGIN:
+    if (op == KnobRegion.Value()) {
+        if (!active) {
             futex_lock(&lock);
-            ASSERT(active == 0, "Tool only supports single threaded tracking!");
             track_tid = tid;
             stats.Clear();
             active = 1;
             futex_unlock(&lock);
-            break;
+        }
+        else {
+            DumpStats();
+            active = 0;
+        }
     }
 }
 
@@ -109,6 +114,11 @@ VOID Instruction(INS ins, VOID *v) {
 
 }
 
+VOID Fini(INT32 code, VOID *v) {
+    if (KnobCountAll.Value() != 0) {
+        DumpStats();
+    }
+}
 
 int main(int argc, char *argv[]) {
     if (PIN_Init(argc, argv)) {
@@ -118,7 +128,12 @@ int main(int argc, char *argv[]) {
     futex_init(&lock);
     ofs.open("stats.yaml", std::ios::trunc);
 
+    if (KnobCountAll.Value() != 0) {
+        active = 1;
+    }
+
     INS_AddInstrumentFunction(Instruction, 0);
+    PIN_AddFiniFunction(Fini, 0);
 
     PIN_StartProgram();
     return 0;
