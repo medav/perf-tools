@@ -5,3 +5,4 @@
 **/obj-*
 doc
 *.yaml
+*.so
