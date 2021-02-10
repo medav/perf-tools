@@ -1,10 +1,10 @@
 
+default: app
 
+.PHONY: clean
 
-app: app.cc
+app: app.cc ../include/pin-perf.hh
 	g++ -o $@ $< -I../include $(EXTRAFLAGS)
 
-.PHONY: pinver
-
-pinver:
-	$(MAKE) -C. app EXTRAFLAGS=-DPINTOOL
+clean:
+	rm -f app
