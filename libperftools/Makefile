@@ -3,8 +3,8 @@ default: $(LIB).so
 
 .PHONY: clean
 
-$(LIB).so: $(LIB).cc ../include/pin-perf.hh ../include/counter-perf.hh
-	g++ -shared -fPIC -o $@ $< -I../include
+$(LIB).so: $(LIB).cc
+	g++ -shared -fPIC -o $@ $<
 
 clean:
 	rm -f *.so

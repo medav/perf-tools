@@ -8,10 +8,38 @@
 #include <asm/unistd.h>
 
 [[maybe_unused]]
+static long my_ioctl(int fd, unsigned long int request, unsigned long arg) {
+
+    register int64_t rax __asm__ ("rax") = __NR_ioctl;
+    register int rdi __asm__ ("rdi") = fd;
+    register unsigned long int rsi __asm__ ("rsi") = request;
+    register unsigned long rdx __asm__ ("rdx") = arg;
+    __asm__ __volatile__ (
+        "syscall"
+        : "+r" (rax)
+        : "r" (rdi), "r" (rsi), "r" (rdx)
+        : "cc", "rcx", "r11", "memory"
+    );
+
+    return rax;
+}
+
+[[maybe_unused]]
 static long perf_event_open(struct perf_event_attr *hw_event, pid_t pid, int cpu, int group_fd, unsigned long flags) {
-  int ret;
-  ret = syscall(__NR_perf_event_open, hw_event, pid, cpu, group_fd, flags);
-  return ret;
+    register int64_t rax __asm__ ("rax") = __NR_perf_event_open;
+    register struct perf_event_attr * rdi __asm__ ("rdi") = hw_event;
+    register pid_t rsi __asm__ ("rsi") = pid;
+    register int rdx __asm__ ("rdx") = cpu;
+    register int r10 __asm__ ("r10") = group_fd;
+    register int r8 __asm__ ("r8") = flags;
+    __asm__ __volatile__ (
+        "syscall"
+        : "+r" (rax)
+        : "r" (rdi), "r" (rsi), "r" (rdx), "r" (r10), "r" (r8)
+        : "cc", "rcx", "r11", "memory"
+    );
+
+    return rax;
 }
 
 struct read_format {
@@ -55,13 +83,13 @@ struct read_format {
     (prefix ## raw_ev).size = sizeof(struct perf_event_attr); \
     \
     (prefix ## ninst_ev).type = PERF_TYPE_HARDWARE; \
-    (prefix ## ninst_ev).config = PERF_COUNT_HW_CPU_CYCLES; \
+    (prefix ## ninst_ev).config = PERF_COUNT_HW_INSTRUCTIONS; \
     (prefix ## ninst_ev).disabled = 1; \
     (prefix ## ninst_ev).exclude_kernel = 1; \
     (prefix ## ninst_ev).exclude_hv = 1; \
     \
     (prefix ## ncyc_ev).type = PERF_TYPE_HARDWARE; \
-    (prefix ## ncyc_ev).config = PERF_COUNT_HW_INSTRUCTIONS; \
+    (prefix ## ncyc_ev).config = PERF_COUNT_HW_CPU_CYCLES; \
     (prefix ## ncyc_ev).disabled = 1; \
     (prefix ## ncyc_ev).exclude_kernel = 1; \
     (prefix ## ncyc_ev).exclude_hv = 1; \
@@ -79,20 +107,61 @@ struct read_format {
     (prefix ## fd_raw) = perf_event_open(&prefix ## raw_ev, 0, -1, -1, 0); \
     CHECK_FD(prefix ## fd_raw);
 
+#define PERF_COUNTERS_RESET(prefix) \
+    CHECK_SYSCALL(my_ioctl(prefix ## fd_ninst, PERF_EVENT_IOC_RESET, 0)); \
+    CHECK_SYSCALL(my_ioctl(prefix ## fd_ncyc, PERF_EVENT_IOC_RESET, 0)); \
+    CHECK_SYSCALL(my_ioctl(prefix ## fd_raw, PERF_EVENT_IOC_RESET, 0)); \
+
+#define PERF_COUNTERS_ENABLE(prefix) \
+    CHECK_SYSCALL(my_ioctl(prefix ## fd_ninst, PERF_EVENT_IOC_ENABLE, 0)); \
+    CHECK_SYSCALL(my_ioctl(prefix ## fd_ncyc, PERF_EVENT_IOC_ENABLE, 0)); \
+    CHECK_SYSCALL(my_ioctl(prefix ## fd_raw, PERF_EVENT_IOC_ENABLE, 0));
+
 #define PERF_COUNTERS_BEGIN(prefix) \
-    CHECK_SYSCALL(ioctl(prefix ## fd_ninst, PERF_EVENT_IOC_RESET, 0)); \
-    CHECK_SYSCALL(ioctl(prefix ## fd_ncyc, PERF_EVENT_IOC_RESET, 0)); \
-    CHECK_SYSCALL(ioctl(prefix ## fd_raw, PERF_EVENT_IOC_RESET, 0)); \
-    CHECK_SYSCALL(ioctl(prefix ## fd_ninst, PERF_EVENT_IOC_ENABLE, 0)); \
-    CHECK_SYSCALL(ioctl(prefix ## fd_ncyc, PERF_EVENT_IOC_ENABLE, 0)); \
-    CHECK_SYSCALL(ioctl(prefix ## fd_raw, PERF_EVENT_IOC_ENABLE, 0));
+    PERF_COUNTERS_RESET(prefix) \
+    PERF_COUNTERS_ENABLE(prefix)
 
+#define PERF_COUNTERS_DISABLE(prefix) \
+    CHECK_SYSCALL(my_ioctl(prefix ## fd_ninst, PERF_EVENT_IOC_DISABLE, 0)); \
+    CHECK_SYSCALL(my_ioctl(prefix ## fd_ncyc, PERF_EVENT_IOC_DISABLE, 0)); \
+    CHECK_SYSCALL(my_ioctl(prefix ## fd_raw, PERF_EVENT_IOC_DISABLE, 0));
 
-#define PERF_COUNTERS_END(prefix) \
-    CHECK_SYSCALL(ioctl(prefix ## fd_ninst, PERF_EVENT_IOC_DISABLE, 0)); \
-    CHECK_SYSCALL(ioctl(prefix ## fd_ncyc, PERF_EVENT_IOC_DISABLE, 0)); \
-    CHECK_SYSCALL(ioctl(prefix ## fd_raw, PERF_EVENT_IOC_DISABLE, 0)); \
-    \
+#define PERF_COUNTERS_CAPTURE(prefix) \
     CHECK_SYSCALL(read(prefix ## fd_ninst, &prefix ## ninst, sizeof(prefix ## ninst))); \
     CHECK_SYSCALL(read(prefix ## fd_ncyc, &prefix ## ncyc, sizeof(prefix ## ncyc))); \
     CHECK_SYSCALL(read(prefix ## fd_ncyc, &prefix ## nraw, sizeof(prefix ## nraw)));
+
+#define PERF_COUNTERS_END(prefix) \
+    PERF_COUNTERS_DISABLE(prefix) \
+    PERF_COUNTERS_CAPTURE(prefix)
+
+
+struct CounterManager {
+    PERF_COUNTERS_VARS(m_)
+
+    CounterManager() {
+        PERF_COUNTERS_SETUP(m_);
+    }
+
+    void Reset() {
+        PERF_COUNTERS_RESET(m_);
+    }
+
+    void Start() {
+        PERF_COUNTERS_ENABLE(m_);
+    }
+
+    void Pause() {
+        PERF_COUNTERS_DISABLE(m_);
+    }
+
+    void Capture() {
+        PERF_COUNTERS_CAPTURE(m_);
+    }
+
+    ~CounterManager() {
+        CHECK_SYSCALL(close(m_fd_ninst));
+        CHECK_SYSCALL(close(m_fd_ncyc));
+        CHECK_SYSCALL(close(m_fd_raw));
+    }
+};

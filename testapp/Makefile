@@ -3,8 +3,8 @@ default: app
 
 .PHONY: clean
 
-app: app.cc ../include/pin-perf.hh
-	g++ -o $@ $< -I../include $(EXTRAFLAGS)
+app: app.cc
+	g++ -pthread -o $@ $< -I../include $(EXTRAFLAGS)
 
 clean:
 	rm -f app
