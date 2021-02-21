@@ -21,6 +21,23 @@ typedef struct pinperf_args {
 }
 
 const UINT32 MAX_INDEX = 4096;
+const UINT32 MAX_SPECIAL = 100;
+
+const UINT32 FP32_COUNT = 0;
+
+#define OPCODE_ADDPS 10
+
+UINT64 CountFp32(INS ins) {
+    OPCODE opcode = INS_Opcode(ins);
+
+    switch (opcode) {
+    case OPCODE_ADDPS:
+        return 4;
+
+    default:
+        return 1;
+    }
+}
 
 KNOB<BOOL> KnobVerbose(KNOB_MODE_WRITEONCE, "pintool",
     "v", "FALSE", "Verbose (debug) output");
@@ -40,8 +57,9 @@ std::ofstream ofs;
 
 struct Stats {
     UINT64 count[MAX_INDEX];
+    UINT64 special[MAX_SPECIAL];
 
-    Stats() : count{{0}} { }
+    Stats() : count{{0}}, special{{0}} { }
 
     Stats& operator=(const Stats& other) = default;
 
@@ -49,6 +67,10 @@ struct Stats {
         Stats ret;
         for (UINT64 i = 0; i < MAX_INDEX; i++) {
             ret.count[i] = count[i] - other.count[i];
+        }
+
+        for (UINT64 i = 0; i < MAX_SPECIAL; i++) {
+            ret.special[i] = special[i] - other.special[i];
         }
 
         return ret;
@@ -93,6 +115,7 @@ VOID DumpStats(THREADID tid, UINT64 rid, Context& rd, Stats& stats) {
         << " rname: " << rd.rname << ", "
         << " opname: " << rd.opname << ", "
         << " total: " << total << ", "
+        << " fp32: " << stats.special[FP32_COUNT] << ", "
         << " stats: {";
 
     for (UINT64 i = 0; i < MAX_INDEX; i++) {
@@ -110,6 +133,11 @@ VOID DumpStats(THREADID tid, UINT64 rid, Context& rd, Stats& stats) {
 VOID PIN_FAST_ANALYSIS_CALL docount(THREADID tid, UINT64 opcode, UINT64 n) {
     ThreadData * td = (ThreadData *)PIN_GetThreadData(imix_key, tid);
     td->cur.count[opcode] += n;
+}
+
+VOID PIN_FAST_ANALYSIS_CALL docount_special(THREADID tid, UINT64 opcode, UINT64 n) {
+    ThreadData * td = (ThreadData *)PIN_GetThreadData(imix_key, tid);
+    td->cur.special[opcode] += n;
 }
 
 VOID ThreadStart(THREADID tid, CONTEXT *ctxt, INT32 flags, VOID *v) {
@@ -173,15 +201,114 @@ VOID InstrumentImage(IMG img, VOID * v) {
     }
 }
 
+
+#define MATCH_OPCODE_STR(str) \
+    if (opcode_str == std::string(str))
+
+#define MATCH_OPCODE_STR_WIDTH(str, w) \
+    if (opcode_str == std::string(str) && INS_OperandWidth(ins, 0) == w)
+
 VOID Trace(TRACE trace, VOID *v)
 {
     // Visit every basic block  in the trace
     for (BBL bbl = TRACE_BblHead(trace); BBL_Valid(bbl); bbl = BBL_Next(bbl))
     {
         Stats bbl_stats;
+
         for (INS ins = BBL_InsHead(bbl); INS_Valid(ins); ins = INS_Next(ins))
         {
-            bbl_stats.count[INS_Opcode(ins)]++;
+            OPCODE opcode  = INS_Opcode(ins);
+            std::string opcode_str = OPCODE_StringShort(opcode);
+            bbl_stats.count[opcode]++;
+
+            // Add
+            MATCH_OPCODE_STR("ADDSS") {
+                bbl_stats.special[FP32_COUNT]++;
+            }
+            else MATCH_OPCODE_STR("VADDSS") {
+                bbl_stats.special[FP32_COUNT]++;
+            }
+            else MATCH_OPCODE_STR("ADDPS") {
+                bbl_stats.special[FP32_COUNT] += 4;
+            }
+            else MATCH_OPCODE_STR_WIDTH("VADDPS", 128) {
+                bbl_stats.special[FP32_COUNT] += 4;
+            }
+            else MATCH_OPCODE_STR_WIDTH("VADDPS", 256) {
+                bbl_stats.special[FP32_COUNT] += 8;
+            }
+            else MATCH_OPCODE_STR("FADD") {
+                bbl_stats.special[FP32_COUNT]++;
+            }
+            else MATCH_OPCODE_STR("FADDP") {
+                bbl_stats.special[FP32_COUNT]++;
+            }
+            // Subtract
+            MATCH_OPCODE_STR("SUBSS") {
+                bbl_stats.special[FP32_COUNT]++;
+            }
+            else MATCH_OPCODE_STR("VSUBSS") {
+                bbl_stats.special[FP32_COUNT]++;
+            }
+            else MATCH_OPCODE_STR("SUBPS") {
+                bbl_stats.special[FP32_COUNT] += 4;
+            }
+            else MATCH_OPCODE_STR_WIDTH("VSUBPS", 128) {
+                bbl_stats.special[FP32_COUNT] += 4;
+            }
+            else MATCH_OPCODE_STR_WIDTH("VSUBPS", 256) {
+                bbl_stats.special[FP32_COUNT] += 8;
+            }
+            else MATCH_OPCODE_STR("FSUB") {
+                bbl_stats.special[FP32_COUNT]++;
+            }
+            else MATCH_OPCODE_STR("FSUBP") {
+                bbl_stats.special[FP32_COUNT]++;
+            }
+            // Multiply
+            else MATCH_OPCODE_STR("MULSS") {
+                bbl_stats.special[FP32_COUNT]++;
+            }
+            else MATCH_OPCODE_STR("VMULSS") {
+                bbl_stats.special[FP32_COUNT]++;
+            }
+            else MATCH_OPCODE_STR("MULPS") {
+                bbl_stats.special[FP32_COUNT] += 4;
+            }
+            else MATCH_OPCODE_STR_WIDTH("VMULPS", 128) {
+                bbl_stats.special[FP32_COUNT] += 4;
+            }
+            else MATCH_OPCODE_STR_WIDTH("VMULPS", 256) {
+                bbl_stats.special[FP32_COUNT] += 8;
+            }
+            else MATCH_OPCODE_STR("FMUL") {
+                bbl_stats.special[FP32_COUNT]++;
+            }
+            else MATCH_OPCODE_STR("FMULP") {
+                bbl_stats.special[FP32_COUNT]++;
+            }
+            // Divide
+            else MATCH_OPCODE_STR("DIVSS") {
+                bbl_stats.special[FP32_COUNT]++;
+            }
+            else MATCH_OPCODE_STR("VDIVSS") {
+                bbl_stats.special[FP32_COUNT]++;
+            }
+            else MATCH_OPCODE_STR("DIVPS") {
+                bbl_stats.special[FP32_COUNT] += 4;
+            }
+            else MATCH_OPCODE_STR_WIDTH("VDIVPS", 128) {
+                bbl_stats.special[FP32_COUNT] += 4;
+            }
+            else MATCH_OPCODE_STR_WIDTH("VDIVPS", 256) {
+                bbl_stats.special[FP32_COUNT] += 8;
+            }
+            else MATCH_OPCODE_STR("FDIV") {
+                bbl_stats.special[FP32_COUNT]++;
+            }
+            else MATCH_OPCODE_STR("FDIVP") {
+                bbl_stats.special[FP32_COUNT]++;
+            }
         }
 
         for (UINT32 i = 0; i < MAX_INDEX; i++) {
@@ -193,6 +320,20 @@ VOID Trace(TRACE trace, VOID *v)
                     IARG_THREAD_ID,
                     IARG_UINT64, i,
                     IARG_UINT64, bbl_stats.count[i],
+                    IARG_END
+                );
+            }
+        }
+
+        for (UINT32 i = 0; i < MAX_SPECIAL; i++) {
+            if (bbl_stats.special[i] > 0) {
+                BBL_InsertCall(
+                    bbl,
+                    IPOINT_BEFORE,
+                    AFUNPTR(docount_special), IARG_FAST_ANALYSIS_CALL,
+                    IARG_THREAD_ID,
+                    IARG_UINT64, i,
+                    IARG_UINT64, bbl_stats.special[i],
                     IARG_END
                 );
             }
