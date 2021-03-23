@@ -24,6 +24,7 @@ const UINT32 MAX_INDEX = 4096;
 const UINT32 MAX_SPECIAL = 100;
 
 const UINT32 FP32_COUNT = 0;
+const UINT32 NON_FP32_COUNT = 1;
 
 #define OPCODE_ADDPS 10
 
@@ -116,6 +117,7 @@ VOID DumpStats(THREADID tid, UINT64 rid, Context& rd, Stats& stats) {
         << " opname: " << rd.opname << ", "
         << " total: " << total << ", "
         << " fp32: " << stats.special[FP32_COUNT] << ", "
+        << " non-fp32: " << stats.special[NON_FP32_COUNT] << ", "
         << " stats: {";
 
     for (UINT64 i = 0; i < MAX_INDEX; i++) {
@@ -244,7 +246,7 @@ VOID Trace(TRACE trace, VOID *v)
                 bbl_stats.special[FP32_COUNT]++;
             }
             // Subtract
-            MATCH_OPCODE_STR("SUBSS") {
+            else MATCH_OPCODE_STR("SUBSS") {
                 bbl_stats.special[FP32_COUNT]++;
             }
             else MATCH_OPCODE_STR("VSUBSS") {
@@ -308,6 +310,9 @@ VOID Trace(TRACE trace, VOID *v)
             }
             else MATCH_OPCODE_STR("FDIVP") {
                 bbl_stats.special[FP32_COUNT]++;
+            }
+            else {
+                bbl_stats.special[NON_FP32_COUNT]++;
             }
         }
 
