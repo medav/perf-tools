@@ -10,6 +10,7 @@
 
 constexpr uint64_t OP_ROI_BEGIN = 1;
 constexpr uint64_t OP_ROI_END = 2;
+constexpr uint64_t OP_ROI_SETMETA = 3;
 
 extern "C" {
 typedef struct pinperf_args {
@@ -91,9 +92,10 @@ struct Context {
     Stats start;
     std::string rname;
     std::string opname;
+    std::string meta;
 
     Context(Stats& _stats, const char * _rname, const char * _opname) :
-        start(_stats), rname(_rname), opname(_opname) {}
+        start(_stats), rname(_rname), opname(_opname), meta("\"\"") {}
 };
 
 struct ThreadData {
@@ -115,6 +117,7 @@ VOID DumpStats(THREADID tid, UINT64 rid, Context& rd, Stats& stats) {
         << " rid: " << rid << ", "
         << " rname: " << rd.rname << ", "
         << " opname: " << rd.opname << ", "
+        << " meta: " << rd.meta << ", "
         << " total: " << total << ", "
         << " fp32: " << stats.special[FP32_COUNT] << ", "
         << " non-fp32: " << stats.special[NON_FP32_COUNT] << ", "
@@ -164,6 +167,19 @@ void * probed_pinperf_call(THREADID tid, ADDRINT _args, ADDRINT _ctx) {
         DumpStats(tid, args->rid, *c, s);
         futex_unlock(&lock);
         delete c;
+    }
+    else if (args->op == OP_ROI_SETMETA) {
+        DEBUG("Roi setmeta: " << args->rid)
+        DEBUG("ctx: " << _ctx)
+        DEBUG("meta: " << args->rname)
+        Context * c = (Context *)_ctx;
+
+        if (c == nullptr) {
+            DEBUG("setmeta: c is null! Ignoring...")
+        }
+        else {
+            c->meta = std::string("\"") + std::string(args->rname) + std::string("\"");
+        }
     }
 
     return nullptr;

@@ -59,7 +59,7 @@ int main() {
 
 
     void * ctx = call_pin(roi_begin(0, "total", "opname"));
-    for (a = 0; a < 100000000; a++) {
+    for (a = 0; a < 100000; a++) {
         r += 1.0f;
     }
     call_pin(roi_end(0), ctx);
