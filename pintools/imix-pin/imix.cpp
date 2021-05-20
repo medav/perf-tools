@@ -61,7 +61,15 @@ struct Stats {
     UINT64 count[MAX_INDEX];
     UINT64 special[MAX_SPECIAL];
 
-    Stats() : count{{0}}, special{{0}} { }
+    Stats() {
+        for (UINT64 i = 0; i < MAX_INDEX; i++) {
+            count[i] = 0;
+        }
+
+        for (UINT64 i = 0; i < MAX_SPECIAL; i++) {
+            special[i] = 0;
+        }
+    }
 
     Stats& operator=(const Stats& other) = default;
 
