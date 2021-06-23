@@ -226,13 +226,189 @@ VOID InstrumentImage(IMG img, VOID * v) {
         PROTO_Free(proto_pinperf_call);
     }
 }
+static bool endswith(const std::string& str, const std::string& suffix)
+{
+    return str.size() >= suffix.size() && 0 == str.compare(str.size()-suffix.size(), suffix.size(), suffix);
+}
 
+static bool startswith(const std::string& str, const std::string& prefix)
+{
+    return str.size() >= prefix.size() && 0 == str.compare(0, prefix.size(), prefix);
+}
 
 #define MATCH_OPCODE_STR(str) \
     if (opcode_str == std::string(str))
 
+#define FUZZYMATCH_OPCODE(prefix, suffix, w) \
+    if (startswith(opcode_str, prefix) && endswith(opcode_str, suffix) && opw == w)
+
 #define MATCH_OPCODE_STR_WIDTH(str, w) \
-    if (opcode_str == std::string(str) && INS_OperandWidth(ins, 0) == w)
+    if (opcode_str == std::string(str) && opw == w)
+
+UINT32 Fp32FlopCount(std::string opcode_str, UINT32 opw) {
+    // FMA
+    FUZZYMATCH_OPCODE("VFMADD", "PS", 512) {
+        return 16*2;
+    }
+    else FUZZYMATCH_OPCODE("VFMADD", "PS", 256) {
+        return 8*2;
+    }
+    else FUZZYMATCH_OPCODE("VFMADD", "PS", 128) {
+        return 4*2;
+    }
+    // Add
+    else MATCH_OPCODE_STR("ADDSS") {
+        return 1;
+    }
+    else MATCH_OPCODE_STR("VADDSS") {
+        return 1;
+    }
+    else MATCH_OPCODE_STR("ADDPS") {
+        return 4;
+    }
+    else MATCH_OPCODE_STR_WIDTH("VADDPS", 128) {
+        return 4;
+    }
+    else MATCH_OPCODE_STR_WIDTH("VADDPS", 256) {
+        return 8;
+    }
+    else MATCH_OPCODE_STR("FADD") {
+        return 1;
+    }
+    else MATCH_OPCODE_STR("FADDP") {
+        return 1;
+    }
+    // Subtract
+    else MATCH_OPCODE_STR("SUBSS") {
+        return 1;
+    }
+    else MATCH_OPCODE_STR("VSUBSS") {
+        return 1;
+    }
+    else MATCH_OPCODE_STR("SUBPS") {
+        return 4;
+    }
+    else MATCH_OPCODE_STR_WIDTH("VSUBPS", 128) {
+        return 4;
+    }
+    else MATCH_OPCODE_STR_WIDTH("VSUBPS", 256) {
+        return 8;
+    }
+    else MATCH_OPCODE_STR("FSUB") {
+        return 1;
+    }
+    else MATCH_OPCODE_STR("FSUBP") {
+        return 1;
+    }
+    // Multiply
+    else MATCH_OPCODE_STR("MULSS") {
+        return 1;
+    }
+    else MATCH_OPCODE_STR("VMULSS") {
+        return 1;
+    }
+    else MATCH_OPCODE_STR("MULPS") {
+        return 4;
+    }
+    else MATCH_OPCODE_STR_WIDTH("VMULPS", 128) {
+        return 4;
+    }
+    else MATCH_OPCODE_STR_WIDTH("VMULPS", 256) {
+        return 8;
+    }
+    else MATCH_OPCODE_STR("FMUL") {
+        return 1;
+    }
+    else MATCH_OPCODE_STR("FMULP") {
+        return 1;
+    }
+    // Divide
+    else MATCH_OPCODE_STR("DIVSS") {
+        return 1;
+    }
+    else MATCH_OPCODE_STR("VDIVSS") {
+        return 1;
+    }
+    else MATCH_OPCODE_STR("DIVPS") {
+        return 4;
+    }
+    else MATCH_OPCODE_STR_WIDTH("VDIVPS", 128) {
+        return 4;
+    }
+    else MATCH_OPCODE_STR_WIDTH("VDIVPS", 256) {
+        return 8;
+    }
+    else MATCH_OPCODE_STR("FDIV") {
+        return 1;
+    }
+    else MATCH_OPCODE_STR("FDIVP") {
+        return 1;
+    }
+    else {
+        return 0;
+    }
+}
+BOOL WidthDependent(std::string opcode_str) {
+    const UINT32 opw = 0;
+    // FMA
+    FUZZYMATCH_OPCODE("VFMADD", "PS", 0) {
+        return true;
+    }
+    // Add
+    else MATCH_OPCODE_STR_WIDTH("VADDPS", 0) {
+        return true;
+    }
+    else MATCH_OPCODE_STR_WIDTH("VADDPS", 0) {
+        return true;
+    }
+    // Subtract
+    else MATCH_OPCODE_STR_WIDTH("VSUBPS", 0) {
+        return true;
+    }
+    else MATCH_OPCODE_STR_WIDTH("VSUBPS", 0) {
+        return true;
+    }
+    // Multiply
+    else MATCH_OPCODE_STR_WIDTH("VMULPS", 0) {
+        return true;
+    }
+    else MATCH_OPCODE_STR_WIDTH("VMULPS", 0) {
+        return true;
+    }
+    // Divide
+    else MATCH_OPCODE_STR_WIDTH("VDIVPS", 0) {
+        return true;
+    }
+    else MATCH_OPCODE_STR_WIDTH("VDIVPS", 0) {
+        return true;
+    }
+    else {
+        return false;
+    }
+}
+
+UINT32 Fp32FlopCount_Cached(INS ins) {
+    static std::map<std::pair<std::string, UINT32>, UINT32> opcode_flop_cache;
+    UINT32 opw = 0;
+    OPCODE opcode  = INS_Opcode(ins);
+    std::string opcode_str = OPCODE_StringShort(opcode);
+
+    if (WidthDependent(opcode_str)) {
+        opw = INS_OperandWidth(ins, 0);
+    }
+
+    auto key = std::make_pair(opcode_str, opw);
+
+    if (opcode_flop_cache.count(key) == 0) {
+        UINT32 count = Fp32FlopCount(opcode_str, opw);
+        opcode_flop_cache[key] = count;
+        return count;
+    }
+    else {
+        return opcode_flop_cache[key];
+    }
+}
+
 
 VOID Trace(TRACE trace, VOID *v)
 {
@@ -244,100 +420,17 @@ VOID Trace(TRACE trace, VOID *v)
         for (INS ins = BBL_InsHead(bbl); INS_Valid(ins); ins = INS_Next(ins))
         {
             OPCODE opcode  = INS_Opcode(ins);
-            std::string opcode_str = OPCODE_StringShort(opcode);
             bbl_stats.count[opcode]++;
 
-            // Add
-            MATCH_OPCODE_STR("ADDSS") {
-                bbl_stats.special[FP32_COUNT]++;
-            }
-            else MATCH_OPCODE_STR("VADDSS") {
-                bbl_stats.special[FP32_COUNT]++;
-            }
-            else MATCH_OPCODE_STR("ADDPS") {
-                bbl_stats.special[FP32_COUNT] += 4;
-            }
-            else MATCH_OPCODE_STR_WIDTH("VADDPS", 128) {
-                bbl_stats.special[FP32_COUNT] += 4;
-            }
-            else MATCH_OPCODE_STR_WIDTH("VADDPS", 256) {
-                bbl_stats.special[FP32_COUNT] += 8;
-            }
-            else MATCH_OPCODE_STR("FADD") {
-                bbl_stats.special[FP32_COUNT]++;
-            }
-            else MATCH_OPCODE_STR("FADDP") {
-                bbl_stats.special[FP32_COUNT]++;
-            }
-            // Subtract
-            else MATCH_OPCODE_STR("SUBSS") {
-                bbl_stats.special[FP32_COUNT]++;
-            }
-            else MATCH_OPCODE_STR("VSUBSS") {
-                bbl_stats.special[FP32_COUNT]++;
-            }
-            else MATCH_OPCODE_STR("SUBPS") {
-                bbl_stats.special[FP32_COUNT] += 4;
-            }
-            else MATCH_OPCODE_STR_WIDTH("VSUBPS", 128) {
-                bbl_stats.special[FP32_COUNT] += 4;
-            }
-            else MATCH_OPCODE_STR_WIDTH("VSUBPS", 256) {
-                bbl_stats.special[FP32_COUNT] += 8;
-            }
-            else MATCH_OPCODE_STR("FSUB") {
-                bbl_stats.special[FP32_COUNT]++;
-            }
-            else MATCH_OPCODE_STR("FSUBP") {
-                bbl_stats.special[FP32_COUNT]++;
-            }
-            // Multiply
-            else MATCH_OPCODE_STR("MULSS") {
-                bbl_stats.special[FP32_COUNT]++;
-            }
-            else MATCH_OPCODE_STR("VMULSS") {
-                bbl_stats.special[FP32_COUNT]++;
-            }
-            else MATCH_OPCODE_STR("MULPS") {
-                bbl_stats.special[FP32_COUNT] += 4;
-            }
-            else MATCH_OPCODE_STR_WIDTH("VMULPS", 128) {
-                bbl_stats.special[FP32_COUNT] += 4;
-            }
-            else MATCH_OPCODE_STR_WIDTH("VMULPS", 256) {
-                bbl_stats.special[FP32_COUNT] += 8;
-            }
-            else MATCH_OPCODE_STR("FMUL") {
-                bbl_stats.special[FP32_COUNT]++;
-            }
-            else MATCH_OPCODE_STR("FMULP") {
-                bbl_stats.special[FP32_COUNT]++;
-            }
-            // Divide
-            else MATCH_OPCODE_STR("DIVSS") {
-                bbl_stats.special[FP32_COUNT]++;
-            }
-            else MATCH_OPCODE_STR("VDIVSS") {
-                bbl_stats.special[FP32_COUNT]++;
-            }
-            else MATCH_OPCODE_STR("DIVPS") {
-                bbl_stats.special[FP32_COUNT] += 4;
-            }
-            else MATCH_OPCODE_STR_WIDTH("VDIVPS", 128) {
-                bbl_stats.special[FP32_COUNT] += 4;
-            }
-            else MATCH_OPCODE_STR_WIDTH("VDIVPS", 256) {
-                bbl_stats.special[FP32_COUNT] += 8;
-            }
-            else MATCH_OPCODE_STR("FDIV") {
-                bbl_stats.special[FP32_COUNT]++;
-            }
-            else MATCH_OPCODE_STR("FDIVP") {
-                bbl_stats.special[FP32_COUNT]++;
-            }
-            else {
+            UINT32 flops = Fp32FlopCount_Cached(ins);
+
+            if (flops == 0) {
                 bbl_stats.special[NON_FP32_COUNT]++;
             }
+            else {
+                bbl_stats.special[FP32_COUNT] += flops;
+            }
+
         }
 
         for (UINT32 i = 0; i < MAX_INDEX; i++) {

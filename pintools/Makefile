@@ -1,7 +1,6 @@
 
 TOOLS= \
-	imix \
-	itrace
+	imix
 
 TOOL_DIRS=$(addsuffix -pin, $(TOOLS))
 
