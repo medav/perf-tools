@@ -1,8 +1,8 @@
 define env-msg
 
 The following environment variables must be defined:
-    PERF_TOOLS (suggested: $(PWD)/..)
-    PIN_ROOT (suggested: $(PWD)/../pin-3.17)
+    PERF_TOOLS (suggested: $(PWD))
+    PIN_ROOT (suggested: $(PWD)/pin-3.17)
 
 Additionally, $$PERF_TOOLS/bin must be in your $$PATH.
 

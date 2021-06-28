@@ -1,6 +1,7 @@
 
 TOOLS= \
-	imix
+	imix \
+	memfoot
 
 TOOL_DIRS=$(addsuffix -pin, $(TOOLS))
 
