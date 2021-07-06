@@ -11,6 +11,8 @@
 constexpr uint64_t OP_ROI_BEGIN = 1;
 constexpr uint64_t OP_ROI_END = 2;
 constexpr uint64_t OP_ROI_SETMETA = 3;
+constexpr uint64_t OP_MEM_BEGIN = 4;
+constexpr uint64_t OP_MEM_END = 5;
 
 extern "C" {
 typedef struct pinperf_args {
@@ -41,6 +43,9 @@ UINT64 CountFp32(INS ins) {
     }
 }
 
+KNOB<INT> KnobChunkSize(KNOB_MODE_WRITEONCE, "pintool",
+    "c", "64", "Memory footprint chunk size");
+
 KNOB<BOOL> KnobVerbose(KNOB_MODE_WRITEONCE, "pintool",
     "v", "FALSE", "Verbose (debug) output");
 
@@ -53,9 +58,9 @@ KNOB<std::string> KnobOutfile(KNOB_MODE_WRITEONCE, "pintool",
     }
 
 TLS_KEY imix_key;
-
 uint32_t lock;
 std::ofstream ofs;
+std::map<ADDRINT, unsigned int> mem;
 
 struct Stats {
     UINT64 count[MAX_INDEX];
@@ -143,6 +148,12 @@ VOID DumpStats(THREADID tid, UINT64 rid, Context& rd, Stats& stats) {
     ofs << "}}" << std::endl;
 }
 
+VOID DumpMem() {
+    uint32_t nlines = mem.size();
+    ofs << "- {tid: -1 rid: null, rname: mem, opname: mem, "
+        << "nlines: " << nlines << "}" << std::endl;
+}
+
 VOID PIN_FAST_ANALYSIS_CALL docount(THREADID tid, UINT64 opcode, UINT64 n) {
     ThreadData * td = (ThreadData *)PIN_GetThreadData(imix_key, tid);
     td->cur.count[opcode] += n;
@@ -188,6 +199,19 @@ void * probed_pinperf_call(THREADID tid, ADDRINT _args, ADDRINT _ctx) {
         else {
             c->meta = std::string("\"") + std::string(args->rname) + std::string("\"");
         }
+    }
+    else if (args->op == OP_MEM_BEGIN) {
+        DEBUG("Mem Begin")
+        mem.clear();
+    }
+    else if (args->op == OP_MEM_END) {
+        DEBUG("Mem End")
+        futex_lock(&lock);
+        DumpMem();
+        futex_unlock(&lock);
+    }
+    else {
+        DEBUG("UNKNOWN OP: " << args->op)
     }
 
     return nullptr;
@@ -409,6 +433,54 @@ UINT32 Fp32FlopCount_Cached(INS ins) {
     }
 }
 
+#define MEM_CHUNK_SIZE 64
+
+static inline ADDRINT mask(ADDRINT ea)  {
+    constexpr ADDRINT mask = ~static_cast<ADDRINT>(MEM_CHUNK_SIZE - 1);
+    return ea & mask;
+}
+
+void load(ADDRINT memea, UINT32 length) {
+    ADDRINT start = mask(memea);
+    ADDRINT end   = mask(memea + length - 1);
+    for(ADDRINT addr = start ; addr <= end ; addr += MEM_CHUNK_SIZE) {
+        mem[addr] = 1;
+    }
+}
+
+void store(ADDRINT memea, UINT32 length) {
+    ADDRINT start = mask(memea);
+    ADDRINT end   = mask(memea + length - 1);
+    for(ADDRINT addr = start ; addr <= end ; addr += MEM_CHUNK_SIZE) {
+        mem[addr] = 1;
+    }
+}
+
+VOID InstrumentMemInst(INS ins) {
+    if (INS_IsMemoryRead(ins) && INS_IsStandardMemop(ins)) {
+        INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR) load,
+                        IARG_MEMORYREAD_EA,
+                        IARG_MEMORYREAD_SIZE,
+                        IARG_END);
+
+    }
+    if (INS_HasMemoryRead2(ins) && INS_IsStandardMemop(ins)) {
+        INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR) load,
+                        IARG_MEMORYREAD2_EA,
+                        IARG_MEMORYREAD_SIZE,
+                        IARG_END);
+
+    }
+    // instrument the store
+    if (INS_IsMemoryWrite(ins) && INS_IsStandardMemop(ins)) {
+        INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR) store,
+                        IARG_MEMORYWRITE_EA,
+                        IARG_MEMORYWRITE_SIZE,
+                        IARG_END);
+
+    }
+}
+
 
 VOID Trace(TRACE trace, VOID *v)
 {
@@ -421,6 +493,8 @@ VOID Trace(TRACE trace, VOID *v)
         {
             OPCODE opcode  = INS_Opcode(ins);
             bbl_stats.count[opcode]++;
+
+            InstrumentMemInst(ins);
 
             UINT32 flops = Fp32FlopCount_Cached(ins);
 
@@ -463,8 +537,6 @@ VOID Trace(TRACE trace, VOID *v)
     }
 }
 
-
-
 void FreeThreadData(void * td) {
     delete (ThreadData *)td;
 }
@@ -474,6 +546,8 @@ int main(int argc, char *argv[]) {
     if (PIN_Init(argc, argv)) {
         return Usage();
     }
+
+    mem = std::map<ADDRINT, unsigned int>();
 
     futex_init(&lock);
     ofs.open(KnobOutfile.Value().c_str(), std::ios::trunc);

@@ -9,6 +9,8 @@ void * pinperf_call(void * args, void * ctx) {
 namespace pin_perf {
 constexpr uint64_t OP_ROI_BEGIN = 1;
 constexpr uint64_t OP_ROI_END = 2;
+constexpr uint64_t OP_MEM_BEGIN = 4;
+constexpr uint64_t OP_MEM_END = 5;
 
 extern "C" {
 typedef struct pinperf_args {
@@ -40,6 +42,24 @@ static inline pinperf_args_t roi_end(uint64_t rid) {
     };
 }
 
+static inline pinperf_args_t mem_begin() {
+    return pinperf_args_t {
+        .op = OP_MEM_BEGIN,
+        .rid = 0,
+        .rname = "",
+        .opname = ""
+    };
+}
+
+static inline pinperf_args_t mem_end() {
+    return pinperf_args_t {
+        .op = OP_MEM_END,
+        .rid = 0,
+        .rname = "",
+        .opname = ""
+    };
+}
+
 void * call_pin(pinperf_args_t args, void * ctx) {
     return pinperf_call((void*)&args, ctx);
 }
@@ -56,4 +76,16 @@ extern "C"
 void perf_roi_end(uint64_t rid, void * ctx) {
     using namespace pin_perf;
     call_pin(roi_end(rid), ctx);
+}
+
+extern "C"
+void perf_mem_begin() {
+    using namespace pin_perf;
+    call_pin(mem_begin());
+}
+
+extern "C"
+void perf_mem_end() {
+    using namespace pin_perf;
+    call_pin(mem_end(), NULL);
 }
