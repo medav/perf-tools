@@ -49,6 +49,12 @@ KNOB<INT> KnobChunkSize(KNOB_MODE_WRITEONCE, "pintool",
 KNOB<BOOL> KnobVerbose(KNOB_MODE_WRITEONCE, "pintool",
     "v", "FALSE", "Verbose (debug) output");
 
+KNOB<BOOL> KnobTrackInst(KNOB_MODE_WRITEONCE, "pintool",
+    "n", "1", "Track Instructions");
+
+KNOB<BOOL> KnobTrackMem(KNOB_MODE_WRITEONCE, "pintool",
+    "m", "0", "Track Memory References");
+
 KNOB<std::string> KnobOutfile(KNOB_MODE_WRITEONCE, "pintool",
     "o", "imix.yaml", "output filename");
 
@@ -150,7 +156,7 @@ VOID DumpStats(THREADID tid, UINT64 rid, Context& rd, Stats& stats) {
 
 VOID DumpMem() {
     uint32_t nlines = mem.size();
-    ofs << "- {tid: -1 rid: null, rname: mem, opname: mem, "
+    ofs << "- { tid: -1, rid: null, rname: mem, opname: mem, "
         << "nlines: " << nlines << "}" << std::endl;
 }
 
@@ -491,47 +497,53 @@ VOID Trace(TRACE trace, VOID *v)
 
         for (INS ins = BBL_InsHead(bbl); INS_Valid(ins); ins = INS_Next(ins))
         {
-            OPCODE opcode  = INS_Opcode(ins);
-            bbl_stats.count[opcode]++;
-
-            InstrumentMemInst(ins);
-
-            UINT32 flops = Fp32FlopCount_Cached(ins);
-
-            if (flops == 0) {
-                bbl_stats.special[NON_FP32_COUNT]++;
-            }
-            else {
-                bbl_stats.special[FP32_COUNT] += flops;
+            if (KnobTrackMem.Value()) {
+                InstrumentMemInst(ins);
             }
 
-        }
+            if (KnobTrackInst.Value()) {
+                OPCODE opcode  = INS_Opcode(ins);
+                bbl_stats.count[opcode]++;
 
-        for (UINT32 i = 0; i < MAX_INDEX; i++) {
-            if (bbl_stats.count[i] > 0) {
-                BBL_InsertCall(
-                    bbl,
-                    IPOINT_BEFORE,
-                    AFUNPTR(docount), IARG_FAST_ANALYSIS_CALL,
-                    IARG_THREAD_ID,
-                    IARG_UINT64, i,
-                    IARG_UINT64, bbl_stats.count[i],
-                    IARG_END
-                );
+
+                UINT32 flops = Fp32FlopCount_Cached(ins);
+
+                if (flops == 0) {
+                    bbl_stats.special[NON_FP32_COUNT]++;
+                }
+                else {
+                    bbl_stats.special[FP32_COUNT] += flops;
+                }
             }
         }
 
-        for (UINT32 i = 0; i < MAX_SPECIAL; i++) {
-            if (bbl_stats.special[i] > 0) {
-                BBL_InsertCall(
-                    bbl,
-                    IPOINT_BEFORE,
-                    AFUNPTR(docount_special), IARG_FAST_ANALYSIS_CALL,
-                    IARG_THREAD_ID,
-                    IARG_UINT64, i,
-                    IARG_UINT64, bbl_stats.special[i],
-                    IARG_END
-                );
+        if (KnobTrackInst.Value()) {
+            for (UINT32 i = 0; i < MAX_INDEX; i++) {
+                if (bbl_stats.count[i] > 0) {
+                    BBL_InsertCall(
+                        bbl,
+                        IPOINT_BEFORE,
+                        AFUNPTR(docount), IARG_FAST_ANALYSIS_CALL,
+                        IARG_THREAD_ID,
+                        IARG_UINT64, i,
+                        IARG_UINT64, bbl_stats.count[i],
+                        IARG_END
+                    );
+                }
+            }
+
+            for (UINT32 i = 0; i < MAX_SPECIAL; i++) {
+                if (bbl_stats.special[i] > 0) {
+                    BBL_InsertCall(
+                        bbl,
+                        IPOINT_BEFORE,
+                        AFUNPTR(docount_special), IARG_FAST_ANALYSIS_CALL,
+                        IARG_THREAD_ID,
+                        IARG_UINT64, i,
+                        IARG_UINT64, bbl_stats.special[i],
+                        IARG_END
+                    );
+                }
             }
         }
     }
@@ -546,6 +558,9 @@ int main(int argc, char *argv[]) {
     if (PIN_Init(argc, argv)) {
         return Usage();
     }
+
+    DEBUG("Track Inst: " << KnobTrackInst.Value())
+    DEBUG("Track Mem: " << KnobTrackMem.Value())
 
     mem = std::map<ADDRINT, unsigned int>();
 
