@@ -439,7 +439,7 @@ UINT32 Fp32FlopCount_Cached(INS ins) {
     }
 }
 
-#define MEM_CHUNK_SIZE 64
+#define MEM_CHUNK_SIZE 4096
 
 static inline ADDRINT mask(ADDRINT ea)  {
     constexpr ADDRINT mask = ~static_cast<ADDRINT>(MEM_CHUNK_SIZE - 1);
