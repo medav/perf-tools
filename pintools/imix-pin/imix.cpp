@@ -66,7 +66,7 @@ KNOB<std::string> KnobOutfile(KNOB_MODE_WRITEONCE, "pintool",
 TLS_KEY imix_key;
 uint32_t lock;
 std::ofstream ofs;
-std::map<ADDRINT, unsigned int> mem;
+std::map<ADDRINT, unsigned char> mem;
 
 struct Stats {
     UINT64 count[MAX_INDEX];
@@ -562,7 +562,7 @@ int main(int argc, char *argv[]) {
     DEBUG("Track Inst: " << KnobTrackInst.Value())
     DEBUG("Track Mem: " << KnobTrackMem.Value())
 
-    mem = std::map<ADDRINT, unsigned int>();
+    mem = std::map<ADDRINT, unsigned char>();
 
     futex_init(&lock);
     ofs.open(KnobOutfile.Value().c_str(), std::ios::trunc);
